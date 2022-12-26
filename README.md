@@ -1,2 +1,2 @@
 # streamlit_image_labeling
-Quick Labeling Tool for Data Scientist
+Recent advances in self-supervised learning has enabled the possibilities of building robust deep learning models with much fewer human labels. The number of required labels could be only 1% of the supervised version. The quality of the labels matters in this case. A quick labeling tool is built here for data scientist to review, modify and label the data. (work in progress)
