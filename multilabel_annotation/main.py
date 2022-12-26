@@ -6,6 +6,7 @@ import os
 from PIL import Image
 import matplotlib.pyplot as plt
 from collections import Counter
+from pandas.api.types import is_numeric_dtype
 
 
 @st.cache(allow_output_mutation=True)
@@ -15,13 +16,14 @@ def get_state():
 
 def load_session(session_file):
     with open(session_file) as json_file:
-        data = json.load(json_file)
-    return data
+        data = json_file.read()
+    return json.loads(data)
 
 
 def save_session(session_file, session_state):
     with open(session_file, "w") as outfile:
-        json.dump(dict(session_state), outfile)
+        json_dumps = json.dumps(dict(session_state))
+        outfile.write(json_dumps)
 
 
 def update_session_file():
@@ -31,19 +33,31 @@ def update_session_file():
 
 def load_label_json(label_path):
     with open(label_path) as json_file:
-        label = json.load(json_file)
-    return label
+        data = json_file.read()
+    return json.loads(data)
+
 
 def update_label_json(label_path, label_dict):
     with open(label_path, "w") as outfile:
-        json.dump(label_dict, outfile)
+        json_dumps = json.dumps(dict(label_dict))
+        outfile.write(json_dumps)
 
 
 def display_session_setup():
     col1, col2, col3 = st.columns([1, 1, 1])
     username = col1.text_input("Please Enter your user name", key="username")
-    load_existing_session = col2.button("Load Existing Session", key="load_existing_session")
-    diff_session_file = col2.file_uploader("Choose a different session file", key="diff_session_file")
+    session_file = os.path.join(home_directory, username + "_session") 
+    if os.path.exists(session_file) and username != "":
+        col2.write("You have a saved session: Load or start a new session")
+        load_existing_session = col2.button("Load Existing Session", key="load_existing_session")
+        col2.text("or")
+    else: 
+        load_existing_session = False 
+    diff_session_file = col2.file_uploader("Choose another session file", key="diff_session_file")
+    col3.write(" ")
+    col3.write(" ")
+    col3.write(" ")
+    col3.write(" ")
     start_new_session = col3.button("Start New Session", key="start_new_session")
     return username, load_existing_session, diff_session_file, start_new_session
 
@@ -51,21 +65,25 @@ def display_session_setup():
 def update_session_profile(session_dict):
     st.session_state["label_path"] = session_dict["label_path"]
     st.session_state["image_folder"] = session_dict["image_folder"]
+    st.session_state["image_csv_file"] = session_dict["image_csv_file"]
+    if "filter1_values" in session_dict:
+        st.session_state["filter1_values"] = tuple(session_dict["filter1_values"])
+    if "multiple_labels" in session_dict:
+        st.session_state["multiple_labels"] = session_dict["multiple_labels"]
+
+
+def update_multiple_labels():
+    st.session_state["multiple_labels"] = multiple_labels
+    update_session_file()
 
 
 def clean_session():
     st.session_state["label_path"] = ""
     st.session_state["image_folder"] = ""
-
-
-def display_image_selection():
-    index = [i for i, user in enumerate(img_df.index) if user == state["current_row"]][0]
-    prev_key = "prev" + str(index)
-    next_key = "next" + str(index)
-    return (st.selectbox("Select an image for labeling", 
-                            img_df.index, index), 
-           st.button("previous", key=prev_key), 
-            st.button("next", key=next_key))
+    if "filter1_values" in st.session_state:
+        del st.session_state["filter1_values"]
+    if "multiple_labels" in st.session_state:
+        del st.session_state["multiple_labels"]
 
 
 def label_category(label_str):
@@ -110,7 +128,7 @@ st.markdown(
 )
 
 home_directory = os.path.join(os.path.expanduser('~'), ".streamlit")
-
+state = get_state()
 
 ## User Session Handle
 if "session_file" in st.session_state and os.path.exists(st.session_state["session_file"]):
@@ -141,7 +159,7 @@ else:
     if start_new_session is True:
         username = st.session_state["username"]
         clean_session()
-        st.session_state["username"] = username 
+        # st.session_state["username"] = username 
         save_session(session_file, st.session_state)
         st.session_state["session_file"] = session_file
     
@@ -154,7 +172,7 @@ image_folder_path = image_path_col1.text_input("Please input the path to the fol
                                         key="image_folder", 
                                         on_change=update_session_file)
 image_path_col2.text("OR")
-image_csv_file = image_path_col3.file_uploader("Please input the path to csv file with 'img_path' column to the images", 
+image_csv_file = image_path_col3.text_input("Please input the path to csv file with 'img_path' column to the images", 
                             key="image_csv_file")
 
 st.subheader("2. Set the Label Path")
@@ -164,7 +182,8 @@ label_path = st.text_input("Please input the path to save the label (json format
 
 img_df = pd.DataFrame(columns=["img_path", "img_name"])
 label_df = pd.DataFrame(columns=["label"])
-label_dict = {"session_file": st.session_state["session_file"]}
+label_dict = {}
+derived_labels=""
 
 if image_folder_path != "":
     if os.path.exists(image_folder_path) is False: 
@@ -175,7 +194,7 @@ if image_folder_path != "":
     img_df = pd.DataFrame.from_dict({"img_path": img_paths, 
                                      "img_name": img_names,
                                      })
-if image_csv_file is not None:
+elif image_csv_file is not None:
     img_df = pd.read_csv(image_csv_file)
     if "img_path" not in img_df:
         st.error("'img_path' doesn't exist in the table")
@@ -189,28 +208,57 @@ else:
     if os.path.exists(label_path):
         label_dict = load_label_json(label_path)
         label_df = pd.Series(label_dict).to_frame(name="label")
+        json_labels = []
+        for _, val in label_dict.items():
+            json_labels.extend(val.split(","))
+        derived_labels = ",".join(sorted(np.unique(json_labels)))
 
 img_df = img_df.join(label_df, on="img_path", how="left")
 img_df.loc[img_df["label"].isna(), "label"] = ""
 ## Display the loaded table 
 st.text("Loaded Image and Labels")
-st.dataframe(img_df, width=500, height=200)
+filter1_col1, filter1_col2 = st.columns([1, 4])
+filter1_col = filter1_col1.text_input("Filter Column Name", key="filter1_col")
+if filter1_col in img_df and is_numeric_dtype(img_df[filter1_col]):
+    min_val, max_val = float(min(0, img_df[filter1_col].min())), float(max(1, img_df[filter1_col].max()))
+    if "filter1_values" in state:
+        filter1_values = state["filter1_values"]
+    else:
+        filter1_values = (min_val, max_val)
+    
+    val1, val2 = filter1_col2.slider("filter 1 range", min_val, max_val, filter1_values, key="filter1_values")
+    img_df = img_df[img_df[filter1_col].apply(lambda x: val1 <= x <= val2)]
 
+st.dataframe(img_df, width=800, height=200)
+
+if len(img_df) == 0:
+    st.error("No images are selected for labels")
 
 #### Step two
 st.header("2. Label the images one by one")
 
-img_width_col, img_height_col, label_input_buff = st.columns([1, 1, 3])
-target_width = img_width_col.number_input("Image target width", min_value=10, max_value=1000, value=300)
-target_height = img_height_col.number_input("target height", min_value=10, max_value=1000, value=300)
-multiple_labels = label_input_buff.text_input("Labels (seperate by ,)", value="dog,cat", key="multiple_labels")
+img_width_col, img_height_col, label_input_buff, save_multilabels_to_session_col = st.columns([1, 1, 3,1])
+target_width = img_width_col.number_input("Image width", min_value=10, max_value=1000, value=300)
+target_height = img_height_col.number_input("height", min_value=10, max_value=1000, value=300)
+union_labels = []
+if "multiple_labels" in st.session_state:
+    union_labels = ",".join(sorted(list(set(derived_labels).union(st.session_state["multiple_labels"].split(",")))))
+    multiple_labels = label_input_buff.text_input("Multi-Label Options (seperate by ,)", value=st.session_state["multiple_labels"])
+else: 
+    if len(derived_labels) == 0:
+        multiple_labels = label_input_buff.text_input("Multi-Label Options (seperate by ,)", value="dog,cat")
+    else:
+        multiple_labels = label_input_buff.text_input("Multi-Label Options (seperate by ,)", value=derived_labels)
+save_multilabels_to_session_col.button("Save Multi-label Options to Session File", on_click=update_multiple_labels)
+
+
 target_labels = [_.strip() for _ in multiple_labels.split(",")]
 
 col1, col2, col3 = st.columns([1.2, 3, 2])
 
-state = get_state()
 
 with col1:
+    
     if "current_row" not in state:
         state["current_row"] = 0
     if "current_row" in state:
@@ -219,26 +267,21 @@ with col1:
         elif state["current_row"] >= len(img_df):
             state["current_row"] = 0
     
-    current_row, prev_click, next_click = display_image_selection()
-
-    input_changed = False 
-    if current_row != state["current_row"] and input_changed is False:
-        state["current_row"] = current_row
-        input_changed = True 
-        # display_image_selection()
-    if prev_click is True and input_changed is False:
-        state["current_row"] -= 1
-        input_changed = True 
-        # display_image_selection()
-    if next_click is True and input_changed is False:
-        state["current_row"] += 1
-        input_changed = True 
-        # display_image_selection()
-    if st.button("Save_session", key="save2"):
-        with open(st.session_state["session_file"], "w") as outfile:
-            json.dump(dict(st.session_state), outfile)
-
-
+    prev_click = st.button("previous")
+    next_click = st.button("next")
+    current_row = state["current_row"]
+    if prev_click is True:
+        current_row -= 1
+        if current_row < 0:
+            current_row = len(img_df) - 1
+    if next_click is True:
+        current_row += 1
+        if current_row >= len(img_df):
+            current_row = 0 
+    current_row = st.selectbox("Select an image for labeling", 
+                            img_df.index, current_row)
+    state["current_row"] = current_row
+        
 with col2:
     img_path = img_df.loc[current_row,"img_path"]
     image = Image.open(img_path)
@@ -248,7 +291,7 @@ with col2:
 
 
 current_labels = img_df.loc[current_row, "label"].split(",")
-selected_labels = col3.multiselect("Label", 
+selected_labels = col3.multiselect("Current Label", 
                                     options=target_labels + [""], 
                                     default=current_labels)
 label_dict[img_path] = ",".join([_ for _ in selected_labels if _ != ""])
