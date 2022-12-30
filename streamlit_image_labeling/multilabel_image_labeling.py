@@ -316,7 +316,7 @@ if check_password():
 
             if "current_row" not in state or state["current_row"] is None:
                 state["current_row"] = 0
-            if "current_row" in state:
+            if "current_row" in state and state["current_row"] is not None:
                 if state["current_row"] < 0:
                     state["current_row"] = len(img_df) - 1
                 elif state["current_row"] >= len(img_df):
