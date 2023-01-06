@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import json
 import os
+from copy import deepcopy
 from PIL import Image
 import matplotlib.pyplot as plt
 from collections import Counter
@@ -26,6 +27,26 @@ if os.path.exists(HOME_DIRECTORY) is False:
 @st.cache(allow_output_mutation=True)
 def get_state():
     return {}
+
+
+@st.cache(allow_output_mutation=True)
+def get_image_csv(csv_file_path):
+    img_df = pd.read_csv(csv_file_path)
+    if "img_path" not in img_df:
+        st.error("'img_path' doesn't exist in the table")
+    img_df["img_name"] = img_df["img_path"].apply(
+        lambda x: x.split("/")[-1].split(".")[0]
+    )
+    if "label" in img_df:
+        img_df = img_df.drop(["label"], axis=1)
+    return img_df
+
+
+@st.cache(allow_output_mutation=True)
+def dataframe_join_image_label(img_df, label_df):
+    img_df = img_df.join(label_df, on="img_path", how="left")
+    img_df.loc[img_df["label"].isna(), "label"] = ""
+    return img_df
 
 
 def display_session_setup():
@@ -72,7 +93,7 @@ def update_session_profile(session_dict):
         st.session_state["image_folder"] = session_dict["image_folder"]
     if "image_csv_file" in session_dict:
         st.session_state["image_csv_file"] = session_dict["image_csv_file"]
-    if "username" in st.session_state:
+    if "username" in session_dict:
         st.session_state["username"] = session_dict["username"]
     if "filter1_values" in session_dict:
         st.session_state["filter1_values"] = tuple(session_dict["filter1_values"])
@@ -146,6 +167,7 @@ def step1_setup_session():
         save_session(session_file, st.session_state)
 
 
+# @st.cache(suppress_st_warning=True, allow_output_mutation=True)
 def step2_setup_image_label_path():
     st.subheader("1. Set Image Path")
     image_path_col1, image_path_col2, image_path_col3 = st.columns([2, 0.5, 2])
@@ -193,14 +215,7 @@ def step2_setup_image_label_path():
         if os.path.exists(image_csv_file) is False:
             st.error(image_csv_file + " doesn't exist")
         else:
-            img_df = pd.read_csv(image_csv_file)
-            if "img_path" not in img_df:
-                st.error("'img_path' doesn't exist in the table")
-            img_df["img_name"] = img_df["img_path"].apply(
-                lambda x: x.split("/")[-1].split(".")[0]
-            )
-            if "label" in img_df:
-                img_df = img_df.drop(["label"], axis=1)
+            img_df = get_image_csv(image_csv_file)
     else:
         st.error("image path is not specified")
 
@@ -259,7 +274,7 @@ def step3_display_and_label(derived_labels, state, img_df, label_dict, label_pat
     save_multilabels_to_session_col.button(
         "Save Multi-label Options to Session File",
         on_click=update_multiple_labels,
-        args=multiple_labels,
+        args=(multiple_labels,),
     )
 
     target_labels = [_.strip() for _ in multiple_labels.split(",")]
@@ -390,8 +405,7 @@ def main():
                 derived_labels,
             ) = step2_setup_image_label_path()
 
-            img_df = img_df.join(label_df, on="img_path", how="left")
-            img_df.loc[img_df["label"].isna(), "label"] = ""
+            img_df = dataframe_join_image_label(img_df, label_df)
 
             ## Display and filter loaded table
             state = get_state()
@@ -427,7 +441,7 @@ def main():
                 step3_display_and_label(
                     derived_labels, state, img_df, label_dict, label_path
                 )
-                step4_label_stats(img_df)
+                step4_label_stats(deepcopy(img_df))
 
 
 if __name__ == "__main__":

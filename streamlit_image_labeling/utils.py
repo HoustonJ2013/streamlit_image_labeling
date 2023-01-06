@@ -19,10 +19,13 @@ def update_session_file():
         save_session(st.session_state["session_file"], st.session_state)
 
 
+@st.cache(allow_output_mutation=True)
 def load_label_json(label_path):
     with open(label_path) as json_file:
         data = json_file.read()
-    return json.loads(data)
+    label_dict = {}
+    label_dict.update(json.loads(data))
+    return label_dict
 
 
 def update_label_json(label_path, label_dict):
